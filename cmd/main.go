@@ -37,6 +37,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	kservev1beta1 "github.com/kserve/kserve/pkg/apis/serving/v1beta1"
+
 	invokeaiv1alpha1 "github.com/red-hat-et/invokeai-operator/api/v1alpha1"
 	"github.com/red-hat-et/invokeai-operator/internal/controller"
 	// +kubebuilder:scaffold:imports
@@ -51,6 +53,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(invokeaiv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kservev1beta1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
