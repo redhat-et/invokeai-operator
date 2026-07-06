@@ -1,0 +1,9 @@
+apiVersion: invokeai.redhat.com/v1alpha1
+kind: InvokeAIPlatform
+metadata:
+  labels:
+    app.kubernetes.io/name: invokeai-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: invokeaiplatform-sample
+spec:
+  # TODO(user): Add fields here

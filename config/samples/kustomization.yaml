@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- invokeai_v1alpha1_invokeaiplatform.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
