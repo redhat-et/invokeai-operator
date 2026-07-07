@@ -1,9 +1,47 @@
 apiVersion: invokeai.redhat.com/v1alpha1
 kind: InvokeAIPlatform
 metadata:
-  labels:
-    app.kubernetes.io/name: invokeai-operator
-    app.kubernetes.io/managed-by: kustomize
-  name: invokeaiplatform-sample
+  name: my-studio
+  namespace: ai-workloads
 spec:
-  # TODO(user): Add fields here
+  invokeai:
+    image: ghcr.io/redhat-et/invokeai-vllm-omni-bridge:latest
+    port: 9090
+    resources:
+      requests:
+        memory: "8Gi"
+        cpu: "2"
+      limits:
+        memory: "16Gi"
+        cpu: "4"
+
+  backends:
+    - name: reasoning
+      role: reasoning
+      model: Qwen/Qwen2.5-Omni-7B
+      runtime: vllm-multimodal
+      resources:
+        requests:
+          nvidia.com/gpu: "1"
+          memory: "24Gi"
+          cpu: "4"
+        limits:
+          nvidia.com/gpu: "1"
+          memory: "32Gi"
+          cpu: "8"
+      extraArgs:
+        - "--stage-overrides={\"0\": {\"gpu_memory_utilization\": 0.65}}"
+
+    - name: image-generation
+      role: image-generation
+      model: black-forest-labs/FLUX.2-klein-4B
+      runtime: vllm-multimodal
+      resources:
+        requests:
+          nvidia.com/gpu: "1"
+          memory: "16Gi"
+          cpu: "2"
+        limits:
+          nvidia.com/gpu: "1"
+          memory: "24Gi"
+          cpu: "4"
