@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -122,6 +123,10 @@ func (r *InvokeAIPlatformReconciler) reconcileBackend(ctx context.Context, platf
 		return err
 	}
 
+	if reflect.DeepEqual(existing.Spec, desired.Spec) && reflect.DeepEqual(existing.Labels, desired.Labels) {
+		return nil
+	}
+
 	existing.Spec = desired.Spec
 	existing.Labels = desired.Labels
 	log.Info("Updating InferenceService", "name", isvcName)
@@ -211,6 +216,12 @@ func (r *InvokeAIPlatformReconciler) reconcileService(ctx context.Context, platf
 		return err
 	}
 
+	if reflect.DeepEqual(existing.Spec.Ports, desired.Spec.Ports) &&
+		reflect.DeepEqual(existing.Spec.Selector, desired.Spec.Selector) &&
+		reflect.DeepEqual(existing.Labels, desired.Labels) {
+		return nil
+	}
+
 	existing.Spec.Ports = desired.Spec.Ports
 	existing.Spec.Selector = desired.Spec.Selector
 	existing.Labels = desired.Labels
@@ -265,6 +276,10 @@ func (r *InvokeAIPlatformReconciler) reconcileDeployment(ctx context.Context, pl
 	}
 	if err != nil {
 		return err
+	}
+
+	if reflect.DeepEqual(existing.Spec, desired.Spec) && reflect.DeepEqual(existing.Labels, desired.Labels) {
+		return nil
 	}
 
 	existing.Spec = desired.Spec
@@ -385,6 +400,8 @@ func (r *InvokeAIPlatformReconciler) updateStatus(ctx context.Context, platform 
 	switch {
 	case allBackendsReady && deployReady:
 		platform.Status.Phase = invokeaiv1alpha1.PhaseReady
+	case !allBackendsReady && deployReady:
+		platform.Status.Phase = invokeaiv1alpha1.PhaseDegraded
 	case len(backendStatuses) > 0:
 		platform.Status.Phase = invokeaiv1alpha1.PhaseDeploying
 	default:
