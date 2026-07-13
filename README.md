@@ -12,7 +12,7 @@ Kubernetes and OpenShift.
 
 A single `InvokeAIPlatform` custom resource replaces manual Helm installs and
 `kubectl` wrangling. The operator's reconciliation loop continuously ensures the
-desired state — creating Deployments, Services, and KServe InferenceServices,
+desired state — creating Deployments, Services, KServe ServingRuntimes, and InferenceServices,
 wiring environment variables, and reporting per-backend health via the CR
 status.
 
@@ -38,7 +38,7 @@ Companion project:
 
 ### Prerequisites
 
-- Go 1.24+
+- Go 1.25+
 - Docker or Podman
 - kubectl
 - Access to a Kubernetes cluster with [KServe](https://kserve.github.io/website/) installed
