@@ -144,9 +144,9 @@ var _ = Describe("InvokeAIPlatform Controller", func() {
 			Expect(envMap).To(HaveKeyWithValue("VLLM_API_KEY", "EMPTY"))
 			Expect(envMap).To(HaveKeyWithValue("VLLM_TIMEOUT", "120"))
 			Expect(envMap).To(HaveKey("VLLM_BASE_URL"))
-			Expect(envMap["VLLM_BASE_URL"]).To(ContainSubstring(platformName + "-reasoning-predictor-default"))
+			Expect(envMap["VLLM_BASE_URL"]).To(ContainSubstring(platformName + "-reasoning-predictor."))
 			Expect(envMap).To(HaveKey("VLLM_IMAGE_BASE_URL"))
-			Expect(envMap["VLLM_IMAGE_BASE_URL"]).To(ContainSubstring(platformName + "-image-generation-predictor-default"))
+			Expect(envMap["VLLM_IMAGE_BASE_URL"]).To(ContainSubstring(platformName + "-image-generation-predictor."))
 		})
 
 		It("should set status phase to Deploying (backends not yet ready)", func() {

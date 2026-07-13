@@ -26,6 +26,12 @@ type InvokeAIPlatformSpec struct {
 	// InvokeAI configures the InvokeAI canvas/workflow engine deployment.
 	InvokeAI InvokeAISpec `json:"invokeai"`
 
+	// KServeMode specifies whether KServe is deployed as RawDeployment or Serverless (Knative).
+	// This affects the predictor Service name and port used in backend URLs.
+	// +kubebuilder:default="RawDeployment"
+	// +optional
+	KServeMode KServeMode `json:"kserveMode,omitempty"`
+
 	// Backends is a list of inference backends the operator should deploy
 	// as KServe InferenceServices and wire into InvokeAI.
 	// +kubebuilder:validation:MinItems=1
@@ -46,6 +52,16 @@ type InvokeAISpec struct {
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
+
+// KServeMode specifies how KServe is deployed on the cluster,
+// which determines the predictor Service naming and port convention.
+// +kubebuilder:validation:Enum=RawDeployment;Serverless
+type KServeMode string
+
+const (
+	KServeModeRawDeployment KServeMode = "RawDeployment"
+	KServeModeServerless    KServeMode = "Serverless"
+)
 
 // BackendRole identifies a backend's function so the controller knows
 // which environment variable to set on the InvokeAI Deployment.

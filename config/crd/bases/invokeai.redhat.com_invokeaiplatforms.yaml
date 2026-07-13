@@ -226,6 +226,15 @@ spec:
                 required:
                 - image
                 type: object
+              kserveMode:
+                default: RawDeployment
+                description: |-
+                  KServeMode specifies whether KServe is deployed as RawDeployment or Serverless (Knative).
+                  This affects the predictor Service name and port used in backend URLs.
+                enum:
+                - RawDeployment
+                - Serverless
+                type: string
             required:
             - backends
             - invokeai

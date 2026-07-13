@@ -343,7 +343,7 @@ func (r *InvokeAIPlatformReconciler) deriveEnvVars(platform *invokeaiv1alpha1.In
 	}
 
 	for _, backend := range platform.Spec.Backends {
-		url := predictorURL(platform.Name, backend.Name, platform.Namespace)
+		url := predictorURL(platform.Name, backend.Name, platform.Namespace, platform.Spec.KServeMode)
 		switch backend.Role {
 		case invokeaiv1alpha1.BackendRoleReasoning:
 			envVars = append(envVars, corev1.EnvVar{Name: "VLLM_BASE_URL", Value: url})
@@ -355,8 +355,12 @@ func (r *InvokeAIPlatformReconciler) deriveEnvVars(platform *invokeaiv1alpha1.In
 	return envVars
 }
 
-func predictorURL(platformName, backendName, namespace string) string {
-	return fmt.Sprintf("http://%s-%s-predictor-default.%s.svc.cluster.local:8000/v1",
+func predictorURL(platformName, backendName, namespace string, mode invokeaiv1alpha1.KServeMode) string {
+	if mode == invokeaiv1alpha1.KServeModeServerless {
+		return fmt.Sprintf("http://%s-%s-predictor-default.%s.svc.cluster.local/v1",
+			platformName, backendName, namespace)
+	}
+	return fmt.Sprintf("http://%s-%s-predictor.%s.svc.cluster.local:8000/v1",
 		platformName, backendName, namespace)
 }
 
@@ -384,7 +388,7 @@ func (r *InvokeAIPlatformReconciler) updateStatus(ctx context.Context, platform 
 			Name:  backend.Name,
 			Ready: ready,
 			Model: backend.Model,
-			URL:   predictorURL(platform.Name, backend.Name, platform.Namespace),
+			URL:   predictorURL(platform.Name, backend.Name, platform.Namespace, platform.Spec.KServeMode),
 		})
 	}
 
