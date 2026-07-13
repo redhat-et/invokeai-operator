@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	kservev1alpha1 "github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
 	kservev1beta1 "github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 
 	invokeaiv1alpha1 "github.com/red-hat-et/invokeai-operator/api/v1alpha1"
@@ -81,7 +82,15 @@ var _ = Describe("InvokeAIPlatform Controller", func() {
 	}
 
 	AfterEach(func() {
-		// Clean up the CR (cascading delete removes children via owner refs)
+		// Clean up child resources (envtest has no GC controller)
+		for _, suffix := range []string{"-vllm-multimodal", "-vllm-diffusion"} {
+			rt := &kservev1alpha1.ServingRuntime{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{
+				Name: platformName + suffix, Namespace: namespace,
+			}, rt); err == nil {
+				_ = k8sClient.Delete(ctx, rt)
+			}
+		}
 		platform := &invokeaiv1alpha1.InvokeAIPlatform{}
 		if err := k8sClient.Get(ctx, namespacedName, platform); err == nil {
 			Expect(k8sClient.Delete(ctx, platform)).To(Succeed())
@@ -193,6 +202,58 @@ var _ = Describe("InvokeAIPlatform Controller", func() {
 			err = k8sClient.Get(ctx, types.NamespacedName{
 				Name: platformName + "-image-generation", Namespace: namespace,
 			}, &isvc)
+			Expect(errors.IsNotFound(err)).To(BeTrue())
+		})
+	})
+
+	Context("When runtimeImage is set", func() {
+		It("should create two ServingRuntimes and override ISVC runtime names", func() {
+			platform := newPlatform()
+			platform.Spec.RuntimeImage = "docker.io/vllm/vllm-omni:v0.22.0"
+			Expect(k8sClient.Create(ctx, platform)).To(Succeed())
+
+			_, err := doReconcile()
+			Expect(err).NotTo(HaveOccurred())
+
+			var multimodal kservev1alpha1.ServingRuntime
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: platformName + "-vllm-multimodal", Namespace: namespace,
+			}, &multimodal)).To(Succeed())
+			Expect(multimodal.Spec.Containers).To(HaveLen(1))
+			Expect(multimodal.Spec.Containers[0].Image).To(Equal("docker.io/vllm/vllm-omni:v0.22.0"))
+			Expect(multimodal.Spec.Containers[0].Command).To(Equal([]string{"python", "-m", "vllm.entrypoints.openai.api_server"}))
+
+			var diffusion kservev1alpha1.ServingRuntime
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: platformName + "-vllm-diffusion", Namespace: namespace,
+			}, &diffusion)).To(Succeed())
+			Expect(diffusion.Spec.Containers[0].Command).To(Equal([]string{"vllm", "serve", "/mnt/models"}))
+
+			// Verify ISVCs reference the managed runtime names
+			var reasoningISVC kservev1beta1.InferenceService
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: platformName + "-reasoning", Namespace: namespace,
+			}, &reasoningISVC)).To(Succeed())
+			Expect(*reasoningISVC.Spec.Predictor.Model.Runtime).To(Equal(platformName + "-vllm-multimodal"))
+
+			var imagegenISVC kservev1beta1.InferenceService
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: platformName + "-image-generation", Namespace: namespace,
+			}, &imagegenISVC)).To(Succeed())
+			Expect(*imagegenISVC.Spec.Predictor.Model.Runtime).To(Equal(platformName + "-vllm-diffusion"))
+		})
+	})
+
+	Context("When runtimeImage is not set", func() {
+		It("should not create ServingRuntimes", func() {
+			Expect(k8sClient.Create(ctx, newPlatform())).To(Succeed())
+			_, err := doReconcile()
+			Expect(err).NotTo(HaveOccurred())
+
+			var rt kservev1alpha1.ServingRuntime
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name: platformName + "-vllm-multimodal", Namespace: namespace,
+			}, &rt)
 			Expect(errors.IsNotFound(err)).To(BeTrue())
 		})
 	})

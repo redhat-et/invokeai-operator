@@ -58,6 +58,7 @@ rules:
   - serving.kserve.io
   resources:
   - inferenceservices
+  - servingruntimes
   verbs:
   - create
   - delete

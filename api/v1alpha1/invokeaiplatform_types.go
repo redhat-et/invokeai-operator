@@ -32,6 +32,12 @@ type InvokeAIPlatformSpec struct {
 	// +optional
 	KServeMode KServeMode `json:"kserveMode,omitempty"`
 
+	// RuntimeImage is the vLLM-Omni container image used for operator-managed ServingRuntimes.
+	// When set, the operator creates two ServingRuntimes per CR (vllm-multimodal and vllm-diffusion).
+	// When omitted, the operator assumes ServingRuntimes already exist on the cluster.
+	// +optional
+	RuntimeImage string `json:"runtimeImage,omitempty"`
+
 	// Backends is a list of inference backends the operator should deploy
 	// as KServe InferenceServices and wire into InvokeAI.
 	// +kubebuilder:validation:MinItems=1

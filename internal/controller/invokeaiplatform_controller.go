@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
+	kservev1alpha1 "github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
 	kservev1beta1 "github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 
 	invokeaiv1alpha1 "github.com/red-hat-et/invokeai-operator/api/v1alpha1"
@@ -52,6 +53,7 @@ type InvokeAIPlatformReconciler struct {
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=serving.kserve.io,resources=inferenceservices,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=serving.kserve.io,resources=servingruntimes,verbs=get;list;watch;create;update;patch;delete
 
 func (r *InvokeAIPlatformReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -66,34 +68,39 @@ func (r *InvokeAIPlatformReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, err
 	}
 
-	// Step 2: Reconcile each backend (InferenceService)
+	// Step 2: Reconcile operator-managed ServingRuntimes (if runtimeImage is set)
+	if err := r.reconcileServingRuntimes(ctx, &platform); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Step 3: Reconcile each backend (InferenceService)
 	for i := range platform.Spec.Backends {
 		if err := r.reconcileBackend(ctx, &platform, &platform.Spec.Backends[i]); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
-	// Step 3: Delete orphaned InferenceServices
+	// Step 4: Delete orphaned InferenceServices
 	if err := r.deleteOrphanedISVCs(ctx, &platform); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	// Step 4: Reconcile the InvokeAI Service
+	// Step 5: Reconcile the InvokeAI Service
 	if err := r.reconcileService(ctx, &platform); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	// Step 5: Reconcile the InvokeAI Deployment
+	// Step 6: Reconcile the InvokeAI Deployment
 	if err := r.reconcileDeployment(ctx, &platform); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	// Step 6: Update status
+	// Step 7: Update status
 	if err := r.updateStatus(ctx, &platform); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	// Step 7: Requeue if not fully ready
+	// Step 8: Requeue if not fully ready
 	if platform.Status.Phase != invokeaiv1alpha1.PhaseReady {
 		log.Info("Platform not fully ready, requeuing", "phase", platform.Status.Phase)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
@@ -102,7 +109,113 @@ func (r *InvokeAIPlatformReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	return ctrl.Result{}, nil
 }
 
-// --- Step 2: Reconcile a single backend as a KServe InferenceService ---
+// --- Step 2: Reconcile operator-managed ServingRuntimes ---
+
+type runtimeDef struct {
+	suffix  string
+	command []string
+	args    []string
+}
+
+var managedRuntimes = []runtimeDef{
+	{
+		suffix:  "vllm-multimodal",
+		command: []string{"python", "-m", "vllm.entrypoints.openai.api_server"},
+		args:    []string{"--model=/mnt/models", "--port=8000"},
+	},
+	{
+		suffix:  "vllm-diffusion",
+		command: []string{"vllm", "serve", "/mnt/models"},
+		args:    []string{"--omni", "--port=8000"},
+	},
+}
+
+func (r *InvokeAIPlatformReconciler) reconcileServingRuntimes(ctx context.Context, platform *invokeaiv1alpha1.InvokeAIPlatform) error {
+	if platform.Spec.RuntimeImage == "" {
+		return nil
+	}
+
+	log := logf.FromContext(ctx)
+
+	for _, rd := range managedRuntimes {
+		name := platform.Name + "-" + rd.suffix
+		desired := r.buildServingRuntime(platform, name, rd)
+		if err := controllerutil.SetControllerReference(platform, desired, r.Scheme); err != nil {
+			return fmt.Errorf("setting owner reference on ServingRuntime %s: %w", name, err)
+		}
+
+		var existing kservev1alpha1.ServingRuntime
+		err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: platform.Namespace}, &existing)
+		if errors.IsNotFound(err) {
+			log.Info("Creating ServingRuntime", "name", name)
+			if err := r.Create(ctx, desired); err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+
+		if reflect.DeepEqual(existing.Spec, desired.Spec) && reflect.DeepEqual(existing.Labels, desired.Labels) {
+			continue
+		}
+
+		existing.Spec = desired.Spec
+		existing.Labels = desired.Labels
+		log.Info("Updating ServingRuntime", "name", name)
+		if err := r.Update(ctx, &existing); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (r *InvokeAIPlatformReconciler) buildServingRuntime(platform *invokeaiv1alpha1.InvokeAIPlatform, name string, rd runtimeDef) *kservev1alpha1.ServingRuntime {
+	return &kservev1alpha1.ServingRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: platform.Namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/name":       "invokeai",
+				"app.kubernetes.io/instance":   platform.Name,
+				"app.kubernetes.io/component":  rd.suffix,
+				"app.kubernetes.io/managed-by": "invokeai-operator",
+			},
+		},
+		Spec: kservev1alpha1.ServingRuntimeSpec{
+			SupportedModelFormats: []kservev1alpha1.SupportedModelFormat{
+				{Name: "vllm", AutoSelect: ptr.To(true)},
+			},
+			MultiModel: ptr.To(false),
+			ServingRuntimePodSpec: kservev1alpha1.ServingRuntimePodSpec{
+				Containers: []corev1.Container{
+					{
+						Name:    "kserve-container",
+						Image:   platform.Spec.RuntimeImage,
+						Command: rd.command,
+						Args:    rd.args,
+						Env: []corev1.EnvVar{
+							{Name: "HOME", Value: "/tmp"},
+							{Name: "LOGNAME", Value: "vllm"},
+							{Name: "USER", Value: "vllm"},
+						},
+						Ports: []corev1.ContainerPort{
+							{
+								Name:          "http",
+								ContainerPort: 8000,
+								Protocol:      corev1.ProtocolTCP,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// --- Step 3: Reconcile a single backend as a KServe InferenceService ---
 
 func (r *InvokeAIPlatformReconciler) reconcileBackend(ctx context.Context, platform *invokeaiv1alpha1.InvokeAIPlatform, backend *invokeaiv1alpha1.BackendSpec) error {
 	log := logf.FromContext(ctx)
@@ -136,6 +249,9 @@ func (r *InvokeAIPlatformReconciler) reconcileBackend(ctx context.Context, platf
 func (r *InvokeAIPlatformReconciler) buildInferenceService(platform *invokeaiv1alpha1.InvokeAIPlatform, backend *invokeaiv1alpha1.BackendSpec) *kservev1beta1.InferenceService {
 	isvcName := platform.Name + "-" + backend.Name
 	runtime := backend.Runtime
+	if platform.Spec.RuntimeImage != "" {
+		runtime = managedRuntimeName(platform.Name, backend.Role)
+	}
 	storageURI := "hf://" + backend.Model
 
 	isvc := &kservev1beta1.InferenceService{
@@ -165,7 +281,7 @@ func (r *InvokeAIPlatformReconciler) buildInferenceService(platform *invokeaiv1a
 	return isvc
 }
 
-// --- Step 3: Delete orphaned InferenceServices ---
+// --- Step 4: Delete orphaned InferenceServices ---
 
 func (r *InvokeAIPlatformReconciler) deleteOrphanedISVCs(ctx context.Context, platform *invokeaiv1alpha1.InvokeAIPlatform) error {
 	log := logf.FromContext(ctx)
@@ -195,7 +311,7 @@ func (r *InvokeAIPlatformReconciler) deleteOrphanedISVCs(ctx context.Context, pl
 	return nil
 }
 
-// --- Step 4: Reconcile the InvokeAI Service ---
+// --- Step 5: Reconcile the InvokeAI Service ---
 
 func (r *InvokeAIPlatformReconciler) reconcileService(ctx context.Context, platform *invokeaiv1alpha1.InvokeAIPlatform) error {
 	log := logf.FromContext(ctx)
@@ -257,7 +373,7 @@ func (r *InvokeAIPlatformReconciler) buildService(platform *invokeaiv1alpha1.Inv
 	}
 }
 
-// --- Step 5: Reconcile the InvokeAI Deployment ---
+// --- Step 6: Reconcile the InvokeAI Deployment ---
 
 func (r *InvokeAIPlatformReconciler) reconcileDeployment(ctx context.Context, platform *invokeaiv1alpha1.InvokeAIPlatform) error {
 	log := logf.FromContext(ctx)
@@ -364,7 +480,16 @@ func predictorURL(platformName, backendName, namespace string, mode invokeaiv1al
 		platformName, backendName, namespace)
 }
 
-// --- Step 6: Update status ---
+func managedRuntimeName(platformName string, role invokeaiv1alpha1.BackendRole) string {
+	switch role {
+	case invokeaiv1alpha1.BackendRoleImageGeneration:
+		return platformName + "-vllm-diffusion"
+	default:
+		return platformName + "-vllm-multimodal"
+	}
+}
+
+// --- Step 7: Update status ---
 
 func (r *InvokeAIPlatformReconciler) updateStatus(ctx context.Context, platform *invokeaiv1alpha1.InvokeAIPlatform) error {
 	var backendStatuses []invokeaiv1alpha1.BackendStatus
@@ -458,6 +583,7 @@ func (r *InvokeAIPlatformReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&invokeaiv1alpha1.InvokeAIPlatform{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
+		Owns(&kservev1alpha1.ServingRuntime{}).
 		Owns(&kservev1beta1.InferenceService{}).
 		Named("invokeaiplatform").
 		Complete(r)

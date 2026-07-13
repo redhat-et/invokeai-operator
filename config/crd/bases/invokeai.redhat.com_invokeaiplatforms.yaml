@@ -235,6 +235,12 @@ spec:
                 - RawDeployment
                 - Serverless
                 type: string
+              runtimeImage:
+                description: |-
+                  RuntimeImage is the vLLM-Omni container image used for operator-managed ServingRuntimes.
+                  When set, the operator creates two ServingRuntimes per CR (vllm-multimodal and vllm-diffusion).
+                  When omitted, the operator assumes ServingRuntimes already exist on the cluster.
+                type: string
             required:
             - backends
             - invokeai
