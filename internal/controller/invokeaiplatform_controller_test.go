@@ -52,7 +52,7 @@ var _ = Describe("InvokeAIPlatform Controller", func() {
 			},
 			Spec: invokeaiv1alpha1.InvokeAIPlatformSpec{
 				InvokeAI: invokeaiv1alpha1.InvokeAISpec{
-					Image: "ghcr.io/redhat-et/invokeai-vllm-omni-bridge:latest",
+					Image: "quay.io/redhat-et/invokeai-vllm-omni-bridge:latest",
 					Port:  9090,
 				},
 				Backends: []invokeaiv1alpha1.BackendSpec{
@@ -144,7 +144,7 @@ var _ = Describe("InvokeAIPlatform Controller", func() {
 
 			Expect(deploy.Spec.Template.Spec.Containers).To(HaveLen(1))
 			container := deploy.Spec.Template.Spec.Containers[0]
-			Expect(container.Image).To(Equal("ghcr.io/redhat-et/invokeai-vllm-omni-bridge:latest"))
+			Expect(container.Image).To(Equal("quay.io/redhat-et/invokeai-vllm-omni-bridge:latest"))
 
 			envMap := make(map[string]string)
 			for _, e := range container.Env {

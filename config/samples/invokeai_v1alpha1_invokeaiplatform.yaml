@@ -5,7 +5,7 @@ metadata:
   namespace: ai-workloads
 spec:
   invokeai:
-    image: ghcr.io/redhat-et/invokeai-vllm-omni-bridge:latest
+    image: quay.io/redhat-et/invokeai-vllm-omni-bridge:latest
     port: 9090
     resources:
       requests:
