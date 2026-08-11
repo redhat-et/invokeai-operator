@@ -152,10 +152,10 @@ var _ = Describe("InvokeAIPlatform Controller", func() {
 			}
 			Expect(envMap).To(HaveKeyWithValue("VLLM_API_KEY", "EMPTY"))
 			Expect(envMap).To(HaveKeyWithValue("VLLM_TIMEOUT", "120"))
-			Expect(envMap).To(HaveKey("VLLM_BASE_URL"))
-			Expect(envMap["VLLM_BASE_URL"]).To(ContainSubstring(platformName + "-reasoning-predictor."))
-			Expect(envMap).To(HaveKey("VLLM_IMAGE_BASE_URL"))
-			Expect(envMap["VLLM_IMAGE_BASE_URL"]).To(ContainSubstring(platformName + "-image-generation-predictor."))
+			Expect(envMap["VLLM_BASE_URL"]).To(Equal(
+				"http://test-studio-reasoning-predictor.default.svc.cluster.local:8000/v1"))
+			Expect(envMap["VLLM_IMAGE_BASE_URL"]).To(Equal(
+				"http://test-studio-image-generation-predictor.default.svc.cluster.local:8000/v1"))
 		})
 
 		It("should set status phase to Deploying (backends not yet ready)", func() {
@@ -222,12 +222,22 @@ var _ = Describe("InvokeAIPlatform Controller", func() {
 			Expect(multimodal.Spec.Containers).To(HaveLen(1))
 			Expect(multimodal.Spec.Containers[0].Image).To(Equal("docker.io/vllm/vllm-omni:v0.22.0"))
 			Expect(multimodal.Spec.Containers[0].Command).To(Equal([]string{"python", "-m", "vllm.entrypoints.openai.api_server"}))
+			Expect(multimodal.Spec.Containers[0].Args).To(Equal([]string{"--model=/mnt/models", "--port=8000"}))
+
+			rtEnvMap := make(map[string]string)
+			for _, e := range multimodal.Spec.Containers[0].Env {
+				rtEnvMap[e.Name] = e.Value
+			}
+			Expect(rtEnvMap).To(HaveKeyWithValue("HOME", "/tmp"))
+			Expect(rtEnvMap).To(HaveKeyWithValue("LOGNAME", "vllm"))
+			Expect(rtEnvMap).To(HaveKeyWithValue("USER", "vllm"))
 
 			var diffusion kservev1alpha1.ServingRuntime
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name: platformName + "-vllm-diffusion", Namespace: namespace,
 			}, &diffusion)).To(Succeed())
 			Expect(diffusion.Spec.Containers[0].Command).To(Equal([]string{"vllm", "serve", "/mnt/models"}))
+			Expect(diffusion.Spec.Containers[0].Args).To(Equal([]string{"--omni", "--port=8000"}))
 
 			// Verify ISVCs reference the managed runtime names
 			var reasoningISVC kservev1beta1.InferenceService
@@ -255,6 +265,31 @@ var _ = Describe("InvokeAIPlatform Controller", func() {
 				Name: platformName + "-vllm-multimodal", Namespace: namespace,
 			}, &rt)
 			Expect(errors.IsNotFound(err)).To(BeTrue())
+		})
+	})
+
+	Context("When kserveMode is Serverless", func() {
+		It("should use Knative predictor URL format in env vars", func() {
+			platform := newPlatform()
+			platform.Spec.KServeMode = invokeaiv1alpha1.KServeModeServerless
+			Expect(k8sClient.Create(ctx, platform)).To(Succeed())
+
+			_, err := doReconcile()
+			Expect(err).NotTo(HaveOccurred())
+
+			var deploy appsv1.Deployment
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: platformName + "-invokeai", Namespace: namespace,
+			}, &deploy)).To(Succeed())
+
+			envMap := make(map[string]string)
+			for _, e := range deploy.Spec.Template.Spec.Containers[0].Env {
+				envMap[e.Name] = e.Value
+			}
+			Expect(envMap["VLLM_BASE_URL"]).To(Equal(
+				"http://test-studio-reasoning-predictor-default.default.svc.cluster.local/v1"))
+			Expect(envMap["VLLM_IMAGE_BASE_URL"]).To(Equal(
+				"http://test-studio-image-generation-predictor-default.default.svc.cluster.local/v1"))
 		})
 	})
 
