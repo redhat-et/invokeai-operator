@@ -236,7 +236,7 @@ func (r *InvokeAIPlatformReconciler) reconcileBackend(ctx context.Context, platf
 		return err
 	}
 
-	if reflect.DeepEqual(existing.Spec, desired.Spec) && reflect.DeepEqual(existing.Labels, desired.Labels) {
+	if isvcModelSpecEqual(&existing, desired) && reflect.DeepEqual(existing.Labels, desired.Labels) {
 		return nil
 	}
 
@@ -244,6 +244,40 @@ func (r *InvokeAIPlatformReconciler) reconcileBackend(ctx context.Context, platf
 	existing.Labels = desired.Labels
 	log.Info("Updating InferenceService", "name", isvcName)
 	return r.Update(ctx, &existing)
+}
+
+// isvcModelSpecEqual compares only the fields the operator controls in the
+// InferenceService spec. KServe's webhook adds extra fields (e.g.
+// automountServiceAccountToken) that would make a full reflect.DeepEqual
+// always return false and trigger a spurious update on every reconcile.
+func isvcModelSpecEqual(existing, desired *kservev1beta1.InferenceService) bool {
+	em := existing.Spec.Predictor.Model
+	dm := desired.Spec.Predictor.Model
+	if em == nil || dm == nil {
+		return em == dm
+	}
+	return reflect.DeepEqual(em.StorageURI, dm.StorageURI) &&
+		reflect.DeepEqual(em.Runtime, dm.Runtime) &&
+		reflect.DeepEqual(em.Resources, dm.Resources) &&
+		reflect.DeepEqual(em.Args, dm.Args) &&
+		reflect.DeepEqual(em.ModelFormat, dm.ModelFormat)
+}
+
+// deploymentSpecEqual compares only the container fields the operator controls.
+// Kubernetes adds many defaulted fields (dnsPolicy, schedulerName,
+// terminationGracePeriodSeconds, container terminationMessagePath, etc.) that
+// would make a full reflect.DeepEqual always return false.
+func deploymentSpecEqual(existing, desired *appsv1.Deployment) bool {
+	if len(existing.Spec.Template.Spec.Containers) == 0 ||
+		len(desired.Spec.Template.Spec.Containers) == 0 {
+		return false
+	}
+	ec := existing.Spec.Template.Spec.Containers[0]
+	dc := desired.Spec.Template.Spec.Containers[0]
+	return ec.Image == dc.Image &&
+		reflect.DeepEqual(ec.Resources, dc.Resources) &&
+		reflect.DeepEqual(ec.Env, dc.Env) &&
+		reflect.DeepEqual(ec.Ports, dc.Ports)
 }
 
 func (r *InvokeAIPlatformReconciler) buildInferenceService(platform *invokeaiv1alpha1.InvokeAIPlatform, backend *invokeaiv1alpha1.BackendSpec) *kservev1beta1.InferenceService {
@@ -394,7 +428,7 @@ func (r *InvokeAIPlatformReconciler) reconcileDeployment(ctx context.Context, pl
 		return err
 	}
 
-	if reflect.DeepEqual(existing.Spec, desired.Spec) && reflect.DeepEqual(existing.Labels, desired.Labels) {
+	if deploymentSpecEqual(&existing, desired) && reflect.DeepEqual(existing.Labels, desired.Labels) {
 		return nil
 	}
 
