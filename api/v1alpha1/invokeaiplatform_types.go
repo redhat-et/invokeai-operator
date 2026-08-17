@@ -38,15 +38,17 @@ type InvokeAIPlatformSpec struct {
 	// +optional
 	RuntimeImage string `json:"runtimeImage,omitempty"`
 
-	// Backends is a list of inference backends the operator should deploy
-	// as KServe InferenceServices and wire into InvokeAI.
-	// +kubebuilder:validation:MinItems=1
-	Backends []BackendSpec `json:"backends"`
+	// Backends is an optional list of inference backends to deploy as KServe
+	// InferenceServices and wire into InvokeAI via environment variables.
+	// When omitted, the operator manages only the InvokeAI Deployment and Service,
+	// leaving model serving to the user.
+	// +optional
+	Backends []BackendSpec `json:"backends,omitempty"`
 }
 
 // InvokeAISpec configures the InvokeAI Deployment and Service.
 type InvokeAISpec struct {
-	// Image is the container image for InvokeAI + bridge plugin.
+	// Image is the container image for the InvokeAI instance.
 	Image string `json:"image"`
 
 	// Port is the port InvokeAI listens on.

@@ -301,4 +301,49 @@ var _ = Describe("InvokeAIPlatform Controller", func() {
 			Expect(result).To(Equal(reconcile.Result{}))
 		})
 	})
+
+	Context("When no backends are specified", func() {
+		It("should create Service and Deployment without InferenceServices", func() {
+			platform := &invokeaiv1alpha1.InvokeAIPlatform{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      platformName,
+					Namespace: namespace,
+				},
+				Spec: invokeaiv1alpha1.InvokeAIPlatformSpec{
+					InvokeAI: invokeaiv1alpha1.InvokeAISpec{
+						Image: "invoke-ai/invokeai:latest",
+						Port:  9090,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, platform)).To(Succeed())
+
+			_, err := doReconcile()
+			Expect(err).NotTo(HaveOccurred())
+
+			var svc corev1.Service
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: platformName + "-invokeai", Namespace: namespace,
+			}, &svc)).To(Succeed())
+
+			var deploy appsv1.Deployment
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: platformName + "-invokeai", Namespace: namespace,
+			}, &deploy)).To(Succeed())
+			Expect(deploy.Spec.Template.Spec.Containers[0].Image).To(Equal("invoke-ai/invokeai:latest"))
+
+			envMap := make(map[string]string)
+			for _, e := range deploy.Spec.Template.Spec.Containers[0].Env {
+				envMap[e.Name] = e.Value
+			}
+			Expect(envMap).To(HaveKeyWithValue("VLLM_API_KEY", "EMPTY"))
+			Expect(envMap).NotTo(HaveKey("VLLM_BASE_URL"))
+			Expect(envMap).NotTo(HaveKey("VLLM_IMAGE_BASE_URL"))
+
+			var p invokeaiv1alpha1.InvokeAIPlatform
+			Expect(k8sClient.Get(ctx, namespacedName, &p)).To(Succeed())
+			Expect(p.Status.Phase).To(Equal(invokeaiv1alpha1.PhasePending))
+			Expect(p.Status.Backends).To(BeEmpty())
+		})
+	})
 })
