@@ -60,13 +60,13 @@ var _ = Describe("InvokeAIPlatform Controller", func() {
 						Name:    "reasoning",
 						Role:    invokeaiv1alpha1.BackendRoleReasoning,
 						Model:   "Qwen/Qwen2.5-Omni-7B",
-						Runtime: "vllm-multimodal",
+						Runtime: runtimeVLLMMultimodal,
 					},
 					{
 						Name:    "image-generation",
 						Role:    invokeaiv1alpha1.BackendRoleImageGeneration,
 						Model:   "black-forest-labs/FLUX.2-klein-4B",
-						Runtime: "vllm-multimodal",
+						Runtime: runtimeVLLMMultimodal,
 					},
 				},
 			},
@@ -111,7 +111,7 @@ var _ = Describe("InvokeAIPlatform Controller", func() {
 				Name: platformName + "-reasoning", Namespace: namespace,
 			}, &reasoningISVC)).To(Succeed())
 			Expect(*reasoningISVC.Spec.Predictor.Model.StorageURI).To(Equal("hf://Qwen/Qwen2.5-Omni-7B"))
-			Expect(*reasoningISVC.Spec.Predictor.Model.Runtime).To(Equal("vllm-multimodal"))
+			Expect(*reasoningISVC.Spec.Predictor.Model.Runtime).To(Equal(runtimeVLLMMultimodal))
 
 			var imagegenISVC kservev1beta1.InferenceService
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
@@ -222,22 +222,22 @@ var _ = Describe("InvokeAIPlatform Controller", func() {
 			Expect(multimodal.Spec.Containers).To(HaveLen(1))
 			Expect(multimodal.Spec.Containers[0].Image).To(Equal("docker.io/vllm/vllm-omni:v0.22.0"))
 			Expect(multimodal.Spec.Containers[0].Command).To(Equal([]string{"python", "-m", "vllm.entrypoints.openai.api_server"}))
-			Expect(multimodal.Spec.Containers[0].Args).To(Equal([]string{"--model=/mnt/models", "--port=8000"}))
+			Expect(multimodal.Spec.Containers[0].Args).To(Equal([]string{"--model=/mnt/models", vllmPortArg}))
 
 			rtEnvMap := make(map[string]string)
 			for _, e := range multimodal.Spec.Containers[0].Env {
 				rtEnvMap[e.Name] = e.Value
 			}
 			Expect(rtEnvMap).To(HaveKeyWithValue("HOME", "/tmp"))
-			Expect(rtEnvMap).To(HaveKeyWithValue("LOGNAME", "vllm"))
-			Expect(rtEnvMap).To(HaveKeyWithValue("USER", "vllm"))
+			Expect(rtEnvMap).To(HaveKeyWithValue("LOGNAME", runtimeVLLM))
+			Expect(rtEnvMap).To(HaveKeyWithValue("USER", runtimeVLLM))
 
 			var diffusion kservev1alpha1.ServingRuntime
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name: platformName + "-vllm-diffusion", Namespace: namespace,
 			}, &diffusion)).To(Succeed())
-			Expect(diffusion.Spec.Containers[0].Command).To(Equal([]string{"vllm", "serve", "/mnt/models"}))
-			Expect(diffusion.Spec.Containers[0].Args).To(Equal([]string{"--omni", "--port=8000"}))
+			Expect(diffusion.Spec.Containers[0].Command).To(Equal([]string{runtimeVLLM, "serve", "/mnt/models"}))
+			Expect(diffusion.Spec.Containers[0].Args).To(Equal([]string{"--omni", vllmPortArg}))
 
 			// Verify ISVCs reference the managed runtime names
 			var reasoningISVC kservev1beta1.InferenceService

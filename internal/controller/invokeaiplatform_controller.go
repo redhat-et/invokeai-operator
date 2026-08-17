@@ -41,6 +41,22 @@ import (
 	invokeaiv1alpha1 "github.com/red-hat-et/invokeai-operator/api/v1alpha1"
 )
 
+const (
+	labelName      = "app.kubernetes.io/name"
+	labelInstance  = "app.kubernetes.io/instance"
+	labelComponent = "app.kubernetes.io/component"
+	labelManagedBy = "app.kubernetes.io/managed-by"
+
+	runtimeVLLM           = "vllm"
+	runtimeVLLMMultimodal = "vllm-multimodal"
+
+	portHTTP    = "http"
+	vllmPortArg = "--port=8000"
+
+	appName      = "invokeai"
+	operatorName = "invokeai-operator"
+)
+
 // InvokeAIPlatformReconciler reconciles a InvokeAIPlatform object
 type InvokeAIPlatformReconciler struct {
 	client.Client
@@ -119,14 +135,14 @@ type runtimeDef struct {
 
 var managedRuntimes = []runtimeDef{
 	{
-		suffix:  "vllm-multimodal",
+		suffix:  runtimeVLLMMultimodal,
 		command: []string{"python", "-m", "vllm.entrypoints.openai.api_server"},
-		args:    []string{"--model=/mnt/models", "--port=8000"},
+		args:    []string{"--model=/mnt/models", vllmPortArg},
 	},
 	{
 		suffix:  "vllm-diffusion",
-		command: []string{"vllm", "serve", "/mnt/models"},
-		args:    []string{"--omni", "--port=8000"},
+		command: []string{runtimeVLLM, "serve", "/mnt/models"},
+		args:    []string{"--omni", vllmPortArg},
 	},
 }
 
@@ -178,15 +194,15 @@ func (r *InvokeAIPlatformReconciler) buildServingRuntime(platform *invokeaiv1alp
 			Name:      name,
 			Namespace: platform.Namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/name":       "invokeai",
-				"app.kubernetes.io/instance":   platform.Name,
-				"app.kubernetes.io/component":  rd.suffix,
-				"app.kubernetes.io/managed-by": "invokeai-operator",
+				labelName:      appName,
+				labelInstance:  platform.Name,
+				labelComponent: rd.suffix,
+				labelManagedBy: operatorName,
 			},
 		},
 		Spec: kservev1alpha1.ServingRuntimeSpec{
 			SupportedModelFormats: []kservev1alpha1.SupportedModelFormat{
-				{Name: "vllm", AutoSelect: ptr.To(true)},
+				{Name: runtimeVLLM, AutoSelect: ptr.To(true)},
 			},
 			MultiModel: ptr.To(false),
 			ServingRuntimePodSpec: kservev1alpha1.ServingRuntimePodSpec{
@@ -198,12 +214,12 @@ func (r *InvokeAIPlatformReconciler) buildServingRuntime(platform *invokeaiv1alp
 						Args:    rd.args,
 						Env: []corev1.EnvVar{
 							{Name: "HOME", Value: "/tmp"},
-							{Name: "LOGNAME", Value: "vllm"},
-							{Name: "USER", Value: "vllm"},
+							{Name: "LOGNAME", Value: runtimeVLLM},
+							{Name: "USER", Value: runtimeVLLM},
 						},
 						Ports: []corev1.ContainerPort{
 							{
-								Name:          "http",
+								Name:          portHTTP,
 								ContainerPort: 8000,
 								Protocol:      corev1.ProtocolTCP,
 							},
@@ -282,9 +298,9 @@ func deploymentSpecEqual(existing, desired *appsv1.Deployment) bool {
 
 func (r *InvokeAIPlatformReconciler) buildInferenceService(platform *invokeaiv1alpha1.InvokeAIPlatform, backend *invokeaiv1alpha1.BackendSpec) *kservev1beta1.InferenceService {
 	isvcName := platform.Name + "-" + backend.Name
-	runtime := backend.Runtime
+	runtimeName := backend.Runtime
 	if platform.Spec.RuntimeImage != "" {
-		runtime = managedRuntimeName(platform.Name, backend.Role)
+		runtimeName = managedRuntimeName(platform.Name, backend.Role)
 	}
 	storageURI := "hf://" + backend.Model
 
@@ -297,7 +313,7 @@ func (r *InvokeAIPlatformReconciler) buildInferenceService(platform *invokeaiv1a
 		Spec: kservev1beta1.InferenceServiceSpec{
 			Predictor: kservev1beta1.PredictorSpec{
 				Model: &kservev1beta1.ModelSpec{
-					ModelFormat: kservev1beta1.ModelFormat{Name: "vllm"},
+					ModelFormat: kservev1beta1.ModelFormat{Name: runtimeVLLM},
 					PredictorExtensionSpec: kservev1beta1.PredictorExtensionSpec{
 						StorageURI: &storageURI,
 						Container: corev1.Container{
@@ -310,7 +326,7 @@ func (r *InvokeAIPlatformReconciler) buildInferenceService(platform *invokeaiv1a
 		},
 	}
 
-	isvc.Spec.Predictor.Model.Runtime = &runtime
+	isvc.Spec.Predictor.Model.Runtime = &runtimeName
 
 	return isvc
 }
@@ -322,8 +338,8 @@ func (r *InvokeAIPlatformReconciler) deleteOrphanedISVCs(ctx context.Context, pl
 
 	var isvcList kservev1beta1.InferenceServiceList
 	if err := r.List(ctx, &isvcList, client.InNamespace(platform.Namespace), client.MatchingLabels{
-		"app.kubernetes.io/managed-by": "invokeai-operator",
-		"app.kubernetes.io/instance":   platform.Name,
+		labelManagedBy: operatorName,
+		labelInstance:  platform.Name,
 	}); err != nil {
 		return err
 	}
@@ -396,7 +412,7 @@ func (r *InvokeAIPlatformReconciler) buildService(platform *invokeaiv1alpha1.Inv
 			Type: corev1.ServiceTypeClusterIP,
 			Ports: []corev1.ServicePort{
 				{
-					Name:       "http",
+					Name:       portHTTP,
 					Port:       port,
 					TargetPort: intstr.FromInt32(port),
 					Protocol:   corev1.ProtocolTCP,
@@ -467,12 +483,12 @@ func (r *InvokeAIPlatformReconciler) buildDeployment(platform *invokeaiv1alpha1.
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:      "invokeai",
+							Name:      appName,
 							Image:     platform.Spec.InvokeAI.Image,
 							Resources: platform.Spec.InvokeAI.Resources,
 							Ports: []corev1.ContainerPort{
 								{
-									Name:          "http",
+									Name:          portHTTP,
 									ContainerPort: port,
 									Protocol:      corev1.ProtocolTCP,
 								},
@@ -519,14 +535,14 @@ func managedRuntimeName(platformName string, role invokeaiv1alpha1.BackendRole) 
 	case invokeaiv1alpha1.BackendRoleImageGeneration:
 		return platformName + "-vllm-diffusion"
 	default:
-		return platformName + "-vllm-multimodal"
+		return platformName + "-" + runtimeVLLMMultimodal
 	}
 }
 
 // --- Step 7: Update status ---
 
 func (r *InvokeAIPlatformReconciler) updateStatus(ctx context.Context, platform *invokeaiv1alpha1.InvokeAIPlatform) error {
-	var backendStatuses []invokeaiv1alpha1.BackendStatus
+	backendStatuses := make([]invokeaiv1alpha1.BackendStatus, 0, len(platform.Spec.Backends))
 	allBackendsReady := true
 
 	for _, backend := range platform.Spec.Backends {
@@ -587,27 +603,27 @@ func isInferenceServiceReady(isvc *kservev1beta1.InferenceService) bool {
 
 func labelsForInvokeAI(platform *invokeaiv1alpha1.InvokeAIPlatform) map[string]string {
 	return map[string]string{
-		"app.kubernetes.io/name":       "invokeai",
-		"app.kubernetes.io/instance":   platform.Name,
-		"app.kubernetes.io/component":  "invokeai",
-		"app.kubernetes.io/managed-by": "invokeai-operator",
+		labelName:      appName,
+		labelInstance:  platform.Name,
+		labelComponent: appName,
+		labelManagedBy: operatorName,
 	}
 }
 
 func selectorLabelsForInvokeAI(platform *invokeaiv1alpha1.InvokeAIPlatform) map[string]string {
 	return map[string]string{
-		"app.kubernetes.io/name":      "invokeai",
-		"app.kubernetes.io/instance":  platform.Name,
-		"app.kubernetes.io/component": "invokeai",
+		labelName:      appName,
+		labelInstance:  platform.Name,
+		labelComponent: appName,
 	}
 }
 
 func labelsForBackend(platform *invokeaiv1alpha1.InvokeAIPlatform, backendName string) map[string]string {
 	return map[string]string{
-		"app.kubernetes.io/name":       "invokeai",
-		"app.kubernetes.io/instance":   platform.Name,
-		"app.kubernetes.io/component":  backendName,
-		"app.kubernetes.io/managed-by": "invokeai-operator",
+		labelName:      appName,
+		labelInstance:  platform.Name,
+		labelComponent: backendName,
+		labelManagedBy: operatorName,
 	}
 }
 
