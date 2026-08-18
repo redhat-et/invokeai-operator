@@ -11,10 +11,30 @@ spec:
   customresourcedefinitions:
     owned:
     - description: InvokeAIPlatform is the Schema for the invokeaiplatforms API.
-      displayName: Invoke AIPlatform
+      displayName: InvokeAI Platform
       kind: InvokeAIPlatform
       name: invokeaiplatforms.invokeai.redhat.com
       version: v1alpha1
+      resources:
+      - kind: Deployment
+        name: ""
+        version: v1
+      - kind: Service
+        name: ""
+        version: v1
+      - kind: InferenceService
+        name: ""
+        version: v1beta1
+      - kind: ServingRuntime
+        name: ""
+        version: v1alpha1
+      specDescriptors:
+      - description: InvokeAI canvas/workflow engine deployment configuration.
+        displayName: InvokeAI
+        path: invokeai
+      - description: Optional list of KServe inference backends to deploy and wire into InvokeAI.
+        displayName: Backends
+        path: backends
   description: A Kubernetes operator for deploying and managing InvokeAI on OpenShift
     and Kubernetes, with optional KServe inference backend wiring.
   displayName: InvokeAI Operator
@@ -46,6 +66,7 @@ spec:
   - email: stadic@redhat.com
     name: sttadic
   maturity: alpha
+  minKubeVersion: 1.25.0
   provider:
     name: Stjepan Tadic
   version: 0.0.0
